@@ -1,63 +1,44 @@
-from flask import Flask, request, jsonify
-import requests
 import os
+import hmac
+import hashlib
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Fetching from environment variables
-MAILERLITE_API_KEY = os.getenv("MAILERLITE_API_KEY")
-EARLY_BIRD_GROUP_ID = os.getenv("EARLY_BIRD_GROUP_ID")
-OTHER_GROUP_ID = os.getenv("OTHER_GROUP_ID")
+# Load the Zoom verification token from Replit's environment variables
+ZOOM_VERIFICATION_TOKEN = os.getenv("ZOOM_VERIFICATION_TOKEN")
 
-# Your Zoom ticket type IDs
-EARLY_BIRD_TICKET_ID = "Lrx0nUqCSEeJxwcV5iZCvg"
+@app.route("/", methods=["GET", "POST"])
+def handle_webhook():
+    if request.method == "GET":
+        return "Zoom Webhook Listener is running."
 
-def add_email_to_mailerlite_group(email, group_id):
-    url = f"https://api.mailerlite.com/api/v2/groups/{group_id}/subscribers"
-    headers = {
-        "Content-Type": "application/json",
-        "X-MailerLite-ApiKey": MAILERLITE_API_KEY
-    }
-    data = {
-        "email": email,
-        "resubscribe": True
-    }
-    response = requests.post(url, json=data, headers=headers)
-    if response.status_code in (200, 201):
-        print(f"Added {email} to MailerLite group {group_id}")
-    else:
-        print(f"Failed to add {email}: {response.status_code} - {response.text}")
+    try:
+        data = request.get_json()
+        print("Received Zoom webhook event:", data)
 
-@app.route("/", methods=["GET"])
-def index():
-    return "Webhook listener is running."
-    
-@app.route("/", methods=["POST"])
-def zoom_webhook():
-    data = request.json
-    if not data:
-        return jsonify({"error": "No JSON received"}), 400
+        # Handle Zoom URL validation event
+        if data.get("event") == "endpoint.url_validation":
+            plain_token = data["payload"]["plainToken"]
 
-    event = data.get("event")
+            encrypted_token = hmac.new(
+                ZOOM_VERIFICATION_TOKEN.encode(),
+                msg=plain_token.encode(),
+                digestmod=hashlib.sha256
+            ).hexdigest()
 
-    if event == "zoom_events.ticket_created":
-        ticket = data["payload"]["object"]
-        email = ticket.get("email")
-        ticket_type_id = ticket.get("ticket_type_id")
+            return jsonify({
+                "plainToken": plain_token,
+                "encryptedToken": encrypted_token
+            }), 200
 
-        if not email or not ticket_type_id:
-            return jsonify({"error": "Missing email or ticket_type_id"}), 400
+        # Handle other webhook events
+        # (You can expand this section to handle more event types as needed)
+        return jsonify({"status": "ok"}), 200
 
-        if ticket_type_id == EARLY_BIRD_TICKET_ID:
-            group_id = EARLY_BIRD_GROUP_ID
-        else:
-            group_id = OTHER_GROUP_ID
-
-        add_email_to_mailerlite_group(email, group_id)
-        return jsonify({"status": "added to group"}), 200
-
-    # Respond 200 to other events to avoid retries
-    return jsonify({"status": "event ignored"}), 200
+    except Exception as e:
+        print("Error handling webhook:", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=3000)
