@@ -1,6 +1,9 @@
 entrypoint = "main.py"
 modules = ["python-3.11"]
 
+[interpreter]
+command = ["python3", "-u", "main.py"]
+
 [nix]
 channel = "stable-24_05"
 
